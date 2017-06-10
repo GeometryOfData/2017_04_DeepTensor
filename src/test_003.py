@@ -3,7 +3,7 @@ Demo of unsupervised learning of tensor structures.
 
 project repo: https://github.com/GeometryOfData/2017_04_DeepTensor
 
-@author: Roy Lederman
+@author: Roy Lederman, Gal Mishne
 '''
 
 import random
@@ -38,7 +38,7 @@ myrunstr = 'test_002'
 num_iter = 10000 
 
 # TF learning rate exponential decay
-learning_rate_start = 0.05
+learning_rate_start = 0.01
 learning_rate_global_step = 1000
 learning_rate_decay_rate = 0.98
 
@@ -64,25 +64,28 @@ imshow_dims = 3
 
 testdat = matplotlib.image.imread('Lenna.png')
 
-# data dimensionality 
+# data dimensionality
 La=testdat.shape[0]
 Lb=testdat.shape[1]
+testdat = np.reshape(testdat[:,:,0],(La,Lb,1))
+print testdat.shape
+
 Ly=testdat.shape[2]
 
 print('reformat')
-datx, daty = dqax.reformatdat(testdat)
+datr, datc, daty = dqax.reformatdat_rc(testdat)
 
-plt.imshow(testdat[:,:,0:imshow_dims]) ; 
-plt.title('The first coordinate of the entries in the dataset (each entry is a vector)');
-plt.show()
+#plt.imshow(testdat[:,:,0:imshow_dims]) ;
+#plt.title('The first coordinate of the entries in the dataset (each entry is a vector)');
+#plt.show()
 
 #
 # Network parameters
 #
 
-batch_size =  np.int(np.sqrt(La*Lb/2) * 5)
-embedding_size_a = 15;#20;#8; 45; 
-embedding_size_b = 15;#20;#8; 45; 
+batch_size =  np.int(np.sqrt(La*Lb/4) * 5)
+embedding_size_a = 15;#20;#8; 45;
+embedding_size_b = 15;#20;#8; 45;
 
 layer1_size = 30;#10; 25
 layer2_size = 30;#5;10; 25
@@ -97,7 +100,7 @@ print('Batch size: '+str(batch_size))
 #
 np.random.seed(123) # Data randomization seed
 
-training_fraction = 0.2
+training_fraction = 0.5
 
 dataperm_ids = np.random.permutation(La*Lb)
 # ids to use in the training set: the first half of the permuted list of indices
@@ -107,22 +110,34 @@ dataperm_ids_test  = dataperm_ids[ range(np.int(La*Lb * training_fraction),La*Lb
 
 # create the actual sets:
 train_y = daty[dataperm_ids_train,:]
-test_y = daty[dataperm_ids_test,:]
-train_x = datx[dataperm_ids_train,:]
-test_x = datx[dataperm_ids_test,:]
-
+test_y  = daty[dataperm_ids_test,:]
+#train_x = datx[dataperm_ids_train,:]
+#test_x = datx[dataperm_ids_test,:]
+train_r = datr[dataperm_ids_train,:]
+test_r  = datr[dataperm_ids_test,:]
+train_c = datc[dataperm_ids_train,:]
+test_c  = datc[dataperm_ids_test,:]
 
 #
 # Show the training set (first coordinate only)
 #
-dat_sp = np.zeros([La,Lb,Ly])
-for j1 in range(len(train_x)):
-    dat_sp[np.int(train_x[j1,0]), np.int(train_x[j1,1])] =train_y[j1]
+#dat_sp = np.zeros([La,Lb,Ly])
+#for j1 in range(len(train_x)):
+#    dat_sp[np.int(train_x[j1,0]), np.int(train_x[j1,1])] =train_y[j1]
 #plt.imshow(dat_sp[:,:,0:3])
 #plt.show()
-plt.imshow(dat_sp[:,:,0:imshow_dims])
-plt.title('The first coordinate of the entries in the sampled dataset (with missing entries)');
-plt.show()
+
+print train_y[:100]
+
+print('show training rows')
+plt.imshow(train_r[:1000,:])
+plt.title('The first coordinate of the entries in the sampled dataset ');
+plt.show(block=False)
+
+print('show training cols')
+plt.imshow(train_c[:1000,:])
+plt.title('The second coordinate of the entries in the sampled dataset ');
+plt.show(block=False)
 
 
 
@@ -135,7 +150,9 @@ sess = tf.InteractiveSession()
 
 # Input variables:
 # x is the two coordinates (indices) of in the 2-D matrix
-x = tf.placeholder(tf.int32, shape=[None, 2]) 
+#x = tf.placeholder(tf.int32, shape=[None, 2])
+r = tf.placeholder(tf.float32, shape=[None, Lb*Ly])
+c = tf.placeholder(tf.float32, shape=[None, La*Ly])
 # y is the entry at each coordinate
 y_ = tf.placeholder(tf.float32, shape=[None, Ly])
 # gstep is used to compute the step size (it would usually be the number of the iteration).
@@ -153,10 +170,10 @@ gstep = tf.placeholder(tf.int32)
 # 
 # These embeddings are variables that the net optimizes. 
 #
-embeddings_a = tf.Variable(
-         tf.random_uniform([La, embedding_size_a], -1.0, 1.0))
-embeddings_b = tf.Variable(
-         tf.random_uniform([Lb, embedding_size_b], -1.0, 1.0))
+#embeddings_a = tf.Variable(
+#         tf.random_uniform([La, embedding_size_a], -1.0, 1.0))
+#embeddings_b = tf.Variable(
+#         tf.random_uniform([Lb, embedding_size_b], -1.0, 1.0))
 #embeddings_a = tf.Variable(
 #        tf.truncated_normal([La, embedding_size_a],stddev=0.1))
 #embeddings_b = tf.Variable(
@@ -167,9 +184,27 @@ embeddings_b = tf.Variable(
 #
 # First step is to take the index of the first dimension and turn it into a vector,
 # and to take the index of the second dimension and turn it into a vector.
-embed_a = tf.gather(embeddings_a, x[:,0])
-embed_b = tf.gather(embeddings_b, x[:,1])
+#embed_a = tf.gather(dat_sp, x[:,0])
+#embed_b = tf.gather(dat_sp, x[:,1])
 
+#
+# Layer 0
+#
+
+#
+# Layer 1 combines the two representations:
+# F1( embd_a , embd_b ) = Relu ( Wa * embd_a + Wb * embd_b + b )
+# where Wa, Wb and b are variables in the optimizations.
+#
+
+# variables of layer one
+Wr = tf.Variable(tf.truncated_normal([Lb*Ly, embedding_size_a],stddev=0.02))
+Wc = tf.Variable(tf.truncated_normal([La*Ly, embedding_size_b],stddev=0.02))
+
+
+# the operation in Layer 0
+embed_a = ( tf.matmul( r, Wr))
+embed_b = ( tf.matmul( c, Wc))
 
 #
 # Layer 1
@@ -182,8 +217,8 @@ embed_b = tf.gather(embeddings_b, x[:,1])
 #
 
 # variables of layer one
-Wa = tf.Variable(tf.truncated_normal([embedding_size_a, layer1_size],stddev=0.02)) 
-Wb = tf.Variable(tf.truncated_normal([embedding_size_b, layer1_size],stddev=0.02))
+Wa = tf.Variable(tf.truncated_normal([embedding_size_a, layer1_size],stddev=0.1))
+Wb = tf.Variable(tf.truncated_normal([embedding_size_b, layer1_size],stddev=0.1))
 F1b = tf.Variable(tf.random_uniform([layer1_size],-0.05,0.05))
 
 # the operation in Layer 1
@@ -270,25 +305,25 @@ accuracy = tf.reduce_mean(tf.cast(pred_cost, tf.float32))
 # 
 # plotting objects
 #
-a_norm = tf.sqrt(tf.reduce_sum(tf.square(embeddings_a), 1, keep_dims=True))
-a_normalized_embeddings = embeddings_a / a_norm
-b_norm = tf.sqrt(tf.reduce_sum(tf.square(embeddings_b), 1, keep_dims=True))
-b_normalized_embeddings = embeddings_b / b_norm
+a_norm = tf.sqrt(tf.reduce_sum(tf.square(embed_a), 1, keep_dims=True))
+a_normalized_embeddings = embed_a / a_norm
+b_norm = tf.sqrt(tf.reduce_sum(tf.square(embed_b), 1, keep_dims=True))
+b_normalized_embeddings = embed_b / b_norm
 
 #
 #
 #
-batch_size_act = np.min([batch_size,len(train_x)] );
+batch_size_act = np.min([batch_size,len(train_y)] );
 print('Actual batch size: '+str(batch_size_act))
 
 #saver = tf.train.Saver() # used to save results
 #myscore = 1.0 # used for saving
-tmppop = range(len(train_x))
+tmppop = range(len(train_y))
 
-final_embeddings_a, final_embeddings_b, final_a_norm, final_b_norm = sess.run([a_normalized_embeddings, b_normalized_embeddings, a_norm, b_norm])
+#final_embeddings_a, final_embeddings_b, final_a_norm, final_b_norm = sess.run([r: train_r, c: train_c, a_normalized_embeddings, b_normalized_embeddings, a_norm, b_norm])
 #final_embeddings_a, final_embeddings_b = sess.run([embeddings_a, embeddings_b])
-print(final_embeddings_a)
-tmpscore = sess.run(accuracy, feed_dict={x: train_x, y_: train_y,  gstep: 0})
+#print(final_embeddings_a)
+tmpscore = sess.run(accuracy, feed_dict={r: train_r, c: train_c, y_: train_y,  gstep: 0})
 print('iter pre'+', current score (training set): '+str(tmpscore))
 
 for i in range(num_iter):
@@ -300,9 +335,9 @@ for i in range(num_iter):
     # Run a step of the iteration, record the learning rate
     tmprate = learning_rate.eval(feed_dict={ gstep: i })
     if (i<optimization_how_many_adam):
-        tmprate, _  = sess.run((learning_rate, train_step_adam), feed_dict={x: train_x[dataperm_ids_tmp,:], y_: train_y[dataperm_ids_tmp], gstep: i })
+        tmprate, _  = sess.run((learning_rate, train_step_adam), feed_dict={r: train_r[dataperm_ids_tmp,:], c: train_c[dataperm_ids_tmp,:], y_: train_y[dataperm_ids_tmp], gstep: i })
     else:
-        tmprate, _  = sess.run((learning_rate, train_step), feed_dict={x: train_x[dataperm_ids_tmp,:], y_: train_y[dataperm_ids_tmp], gstep: i })
+        tmprate, _  = sess.run((learning_rate, train_step), feed_dict={r: train_r[dataperm_ids_tmp,:], c: train_c[dataperm_ids_tmp,:], y_: train_y[dataperm_ids_tmp], gstep: i })
         
     if ((i % 1000) == 0): # Let us know that you are still alive
         print('iter '+str(i)+' - '+myrunstr )
@@ -310,18 +345,22 @@ for i in range(num_iter):
         print('iter '+str(i)+', current learning rate is '+str(tmprate))
         # Accuracy on the entire training set (slow...)
         #tmpscore = sess.run(accuracy, feed_dict={x: train_x, y_: train_y,  gstep: i})
-        tmpscore = accuracy.eval( feed_dict={x: train_x, y_: train_y,  gstep: i})
+        tmpscore = accuracy.eval( feed_dict={r: train_r, c: train_c, y_: train_y,  gstep: i})
         print('iter '+str(i)+', current score (training set): '+str(tmpscore))
         # Accuracy on the entire test set (slow...)
-        tmptestscore = sess.run(accuracy, feed_dict={x: test_x, y_: test_y,  gstep: i})
+        tmptestscore = sess.run(accuracy, feed_dict={r: test_r, c: test_c, y_: test_y,  gstep: i})
         print('iter '+str(i)+', current score (test set)    : '+str(tmptestscore))
         #if (tmpscore <= myscore):
         #    #tmppath = saver.save(sess, "test_save")
         #    #print("model saved")
         #    myscore = tmpscore
-    if ((i>0)&(((i)%show_results_once_in)==0)):
+    if ((((i)%show_results_once_in)==0)):
         # The normalized objects have fewer outliers
-        final_embeddings_a, final_embeddings_b, final_a_norm, final_b_norm = sess.run([a_normalized_embeddings, b_normalized_embeddings, a_norm, b_norm])
+        print('calc embedding layer')
+        tmp1 = np.reshape(testdat,[La, Lb*Ly])
+        tmp2 = np.reshape(np.transpose(testdat,(1,0,2)),[Lb, La*Ly])
+        
+        final_embeddings_a, final_embeddings_b, final_a_norm, final_b_norm = sess.run([a_normalized_embeddings, b_normalized_embeddings, a_norm, b_norm],feed_dict={r:tmp1, c: tmp2})
         #final_embeddings_a, final_embeddings_b, final_a_norm, final_b_norm = sess.run([a_normalized_embeddings, b_normalized_embeddings, a_norm, b_norm])
         # The actual representations:
         #final_embeddings_a, final_embeddings_b = sess.run([embeddings_a, embeddings_b])
@@ -331,7 +370,7 @@ for i in range(num_iter):
         #
         # TSNE Embedding
         #
-        
+        print('TSNE')
         tsne_a = TSNE(perplexity=20, n_components=2, init='pca', n_iter=5000)
         low_dim_embs_a = tsne_a.fit_transform(final_embeddings_a)
         tsne_b = TSNE(perplexity=20, n_components=2, init='pca', n_iter=5000)
@@ -365,13 +404,17 @@ for i in range(num_iter):
         # Try to get the entire dataset at all points in the matrix
         #
         #tmpy = sess.run(y, feed_dict={x: datx, y_: 0*daty, gstep : 1 })
-        tmpy = y.eval( feed_dict={x: datx, y_: 0*daty, gstep : 1 })
+        tmpy = y.eval( feed_dict={r: datr, c: datc, y_: 0*daty, gstep : 1 })
+        print tmpy.shape
         #tmpy = y.eval( feed_dict={x: train_x, y_: 0*train_y, gstep : 1 })
         # reformat into the original form
         dat_re = np.zeros([La,Lb,Ly])
+        sanity_y = np.zeros([La,Lb,Ly])
         #print(len(datx))
-        for j1 in range(len(datx)):
-            dat_re[np.int(datx[j1,0]), np.int(datx[j1,1])] =tmpy[j1]
+        for j1 in range(La):
+            for j2 in range(Lb):
+                dat_re[j1, j2,:] =tmpy[j1*Lb+j2]
+                sanity_y[j1, j2,:] =daty[j1*Lb+j2]
         #print(len(train_x))
         #print(train_y)
         #print(tmpy)
@@ -382,10 +425,12 @@ for i in range(num_iter):
         #print(dat_re.shape)
         plt.subplot(325) 
         #print(dat_re.shape)
-        plt.imshow(dat_re)
         #plt.imshow(dat_re[:,:,0:3])
-        plt.imshow(dat_re[:,:,0:imshow_dims])
-        
+        if Ly==1:
+            plt.imshow(np.reshape(dat_re,(La,Lb)),vmin=0,vmax=1)
+        else:
+            plt.imshow(dat_re[:,:,0:imshow_dims])
+    
         
         #
         # A hack to print while running, may fail in different versions
@@ -393,12 +438,14 @@ for i in range(num_iter):
         plt.draw()
         plt.show(block=False)
         plt.pause(0.0001)
-        
 
+#plt.figure()
+#       plt.imshow(np.reshape(sanity_y,(La,Lb)),vmin=0,vmax=1)
+#       plt.show(block=False)
+#       print dat_re[:10,:10]
 
-
-print(sess.run(accuracy, feed_dict={x: train_x, y_: train_y}))
-print(sess.run(accuracy, feed_dict={x: test_x, y_: test_y}))
+print(sess.run(accuracy, feed_dict={r: train_r, c: train_c, y_: train_y}))
+print(sess.run(accuracy, feed_dict={r: test_r, c: test_c, y_: test_y}))
 
 input("Press Enter to continue...")
 
